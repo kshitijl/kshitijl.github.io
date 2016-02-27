@@ -15,14 +15,53 @@ beneath me!
 
 But lately things have changed. Something big is happening. I'm not
 overstating things when I say that the new hardware available is
-different in kind, not just in degree. The end of Moore's law in the
-traditional sense has stimulated creativity in hardware AND software.
+different in kind, not just in degree. To take advantage of it
+requires redesigning a lot of our systems at a fundamental level.
+That's exciting.
 
-Machine learning.
+One example is GPU computing: massive fine-grained parallelism with
+limited memory, no deep pipelines, no out-of-order execution, and no
+sophisticated cache hierarchy. It's like we had to throw out many of
+the microarchitectural tricks for CPUs before we could get great
+performance in this different paradigm. And the hardware is good for a
+different type of problem than what CPUs are good at.
 
-The massive success of machine learning in the last decade can be
-summarized like so: use simple, general, computationally tractable
-models on gigantic datasets. For example, neural networks are linear
-classifiers connected in a graph, trained using gradient descent.
+Another example is fast non-volatile memory. Traditionally, there is
+huge gap in performance between RAM and hard drives. The latency of
+accessing a hard drive is 2-3 orders of magnitude greater than
+accessing main memory, but hard drives have 1-2 orders of magnitude
+more capacity. The new SSDs are a genuinely new category of memory
+that sits between the two in terms of latency, throughput and
+capacity.
 
-For me, this is the heart of what makes performance interesting again. 
+The assumption that permanent storage is much slower than RAM is baked
+into the design of filesystems, kernel system calls, the virtual
+memory system and the design of data centers. We're finding out that
+the overhead of the context switch for a syscall is too great when the
+SSD returns with data immediately. And the new memory is expensive, so
+it makes sense to saturate it using several CPUS, a complete reversal
+of the usual design where several hard drives are controlled by a
+single CPU.
+
+This has incredibly deep consequences for our programs: we need to
+redesign all the way down to our algorithms. We need to rewrite large
+parts of the OS kernel and standard libraries. Our high-level
+languages are inappropriate and don't expose the new functionality so
+we're stuck with C/C++ for now. What will a high-level equivalent of
+CUDA look like?
+
+At the same time, we have an exciting new use for all this power:
+statistical machine learning with huge datasets. The massive success
+of machine learning in the last decade can be summarized like so: use
+simple models on gigantic datasets.
+
+Well, the models have to be sufficiently general (flexible) to be
+effective across many problems. And they have to be computationally
+tractable otherwise we can't train them on huge datasets. For example,
+neural networks are linear classifiers connected in a graph, trained
+using gradient descent. This is possible because backpropagation makes
+it efficient to compute gradients for large networks and truly huge
+datasets.
+
+For me, this is the heart of what makes performance interesting again:
+it yields better results, because you can use more data to train..
