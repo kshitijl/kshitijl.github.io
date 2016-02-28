@@ -12,9 +12,8 @@ description: > # this means to ignore newlines until "baseurl:"
   I want to do linear algebra using my computer. But first, I'll have
   to build it.
 baseurl: "" # the subpath of your site, e.g. /blog
-url: "http://yourdomain.com" # the base hostname & protocol for your site
-twitter_username: jekyllrb
-github_username:  jekyll
+url: "http://kshitijl.github.io"
+github_username:  kshitijl
 
 # Build settings
 markdown: kramdown
