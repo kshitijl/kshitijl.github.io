@@ -5,30 +5,32 @@ date:   2016-02-18 00:05:26 -0500
 categories: intro
 ---
 
-I used to not care about hardware.
+#I used to not care about hardware.
 
-I'm one of those typical programmers who care about algorithms and
+I'm one of those typical programmers who cares about algorithms and
 software design. I like math and statically typed functional
 languages, although I choose Python for most tasks. I couldn't care
-less about the latest hardware or javascript framework. Trends are
-beneath me!
+less about the latest graphics card or javascript framework. Trends
+are beneath me!
 
 But lately things have changed. Something big is happening. I'm not
 overstating things when I say that the new hardware available is
 different in kind, not just in degree. To take advantage of it
 requires redesigning a lot of our systems at a fundamental level.
-That's exciting.
+And that's exciting!
+
+### The new hardware is not just "the same but better"
 
 One example is GPU computing: massive fine-grained parallelism with
 limited memory, no deep pipelines, no out-of-order execution, and no
 sophisticated cache hierarchy. It's like we had to throw out many of
-the microarchitectural tricks for CPUs before we could get great
-performance in this different paradigm. And the hardware is good for a
-different type of problem than what CPUs are good at.
+the microarchitectural tricks that worked for CPUs before we could get
+great performance in this different paradigm. And this paradigm is
+good for a different type of problem than what CPUs are good for.
 
 Another example is fast non-volatile memory. Traditionally, there is
 huge gap in performance between RAM and hard drives. The latency of
-accessing a hard drive is 2-3 orders of magnitude greater than
+accessing a hard drive is 2-3 orders of magnitude greater than that of
 accessing main memory, but hard drives have 1-2 orders of magnitude
 more capacity. The new SSDs are a genuinely new category of memory
 that sits between the two in terms of latency, throughput and
@@ -39,29 +41,68 @@ into the design of filesystems, kernel system calls, the virtual
 memory system and the design of data centers. We're finding out that
 the overhead of the context switch for a syscall is too great when the
 SSD returns with data immediately. And the new memory is expensive, so
-it makes sense to saturate it using several CPUS, a complete reversal
-of the usual design where several hard drives are controlled by a
-single CPU.
+it makes sense to saturate it using several CPUS. That's a complete
+reversal of the usual design where several hard drives are controlled
+by a single CPU.
 
-This has incredibly deep consequences for our programs: we need to
-redesign all the way down to our algorithms. We need to rewrite large
-parts of the OS kernel and standard libraries. Our high-level
-languages are inappropriate and don't expose the new functionality so
-we're stuck with C/C++ for now. What will a high-level equivalent of
-CUDA look like?
+###This has incredibly deep consequences for our programs
+
+It used to be the case that we could expect software to get faster
+every year with no extra work -- we could piggyback off of hardware
+improvements. That's not true any more. The hardware's still getting
+better, but not at running the old kinds of software (by much).
+
+To take advantage of the new hardware, we need to redesign all the way
+down to our algorithms. We need to rewrite large parts of the OS
+kernel and standard libraries. Our high-level languages are
+inappropriate and don't expose the new functionality so we're stuck
+with C/C++ for now. What will a high-level equivalent of CUDA look
+like?
+
+### Learning from data
 
 At the same time, we have an exciting new use for all this power:
-statistical machine learning with huge datasets. The massive success
-of machine learning in the last decade can be summarized like so: use
-simple models on gigantic datasets.
+statistical machine learning. The massive success of machine learning
+in the last decade can be summarized like so: use simple models on
+gigantic datasets.
 
 Well, the models have to be sufficiently general (flexible) to be
 effective across many problems. And they have to be computationally
-tractable otherwise we can't train them on huge datasets. For example,
-neural networks are linear classifiers connected in a graph, trained
-using gradient descent. This is possible because backpropagation makes
-it efficient to compute gradients for large networks and truly huge
-datasets.
+tractable otherwise we couldn't train them on huge datasets.
+
+For example, neural networks are linear classifiers connected in a
+graph, trained using gradient descent. Linear classifiers are about
+the simplest model imaginable (few parameters), but connecting several
+of them in a graph increases flexibility (inevitably accompanied by an
+increase in the number of parameters).
+
+To nail down the right values of all those parameters you use a large
+number of training examples. This can be expressed as a mathematical
+optimization problem: minimize error(model, data).
+
+There is no general efficient algorithm for such optimization problems
+but there are ways to find approximate solutions quickly if you can
+compute the first derivatives of the error with respect to all the
+parameters of the model (this imposes restrictions on what kinds of
+models are admissible: not all models are differentiable). And there
+is no general efficient algorithm to compute derivatives.
+
+But for the special case of linear classifiers connected in a graph,
+there's an algorithm called backpropagation that makes it efficient to
+compute gradients for large networks and truly huge datasets. And
+that's why neural networks work.
+
+It's an amazing paradox that mathematicians are working to explain:
+dumb algorithms paired with huge amounts of data make for very smart
+models, much smarter than anyone has been able to create with
+traditional methods. This is in contrast to the previous incarnation
+of AI, which used the expressive power of LISP to create very smart
+algorithms known as "expert systems". While this line of research
+contributed fundamental advances in areas like combinatorial
+optimization and programming language theory, it did not succeed at
+tasks like driving vehicles or translation.
 
 For me, this is the heart of what makes performance interesting again:
-it yields better results, because you can use more data to train..
+it yields better results, because you can use more data to train. And
+in this new world, you have to get close to the hardware if you want
+performance.
