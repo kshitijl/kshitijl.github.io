@@ -5,37 +5,40 @@ date:   2016-02-24 00:05:26 -0500
 categories: measurement
 ---
 
-Modern CPUs are faster than older ones not only because they pack more
-silicon, but also because their architecture is more clever. The most
-fundamental of these architectural ideas is the memory hierarchy, or
-caching. When a program asks for some data in RAM, it is stored in a
-smaller, faster block of memory that's closer to the CPU. The hope is
-that the program will ask for that same bit of data again, and when
-that happens it can be served much more quickly.
+###Modern CPUs are faster than older ones
 
-Like many other microarchitectural improvements like prefetching,
-pipelining, branch prediction or out-of-order execution, caching
+That's not just because they pack more silicon, but also because their
+architecture is more clever. The most fundamental of these
+architectural ideas is the memory hierarchy, or _caching_. When a
+program asks for some data in RAM, it is first put into a smaller,
+faster block of memory that's closer to the CPU. The hope is that the
+program will ask for that same bit of data again, and when that
+happens it can be served much more quickly.
+
+Like many other microarchitectural improvements (like prefetching,
+pipelining, branch prediction or out-of-order execution), caching
 offers a transparent performance boost to all programs. This means
 that old programs will run faster on the new, smarter hardware. It
 also means that programs written in high-level languages will benefit
 even though those languages typically make no affordances to such
 low-level concerns.
 
-But, as we will see in a future post about matrix multiplication, a
+But, as we will see in a future post about matrix multiplication, __a
 program designed with the cache hierarchy in mind can be orders of
-magnitude faster than a naive implementation.
+magnitude faster than a naive implementation__.
 
 This is a fact that many programmers have heard but few have seen
 firsthand. I think that makes it hard to know what to do with it. In a
 complex programming environment with a high-level language and its
-runtime, it can be hard to imagine what it would mean to take
-advantage of the memory hierarchy other than vague notions like
-"improve data locality" and "think about access patterns".
+runtime, it can be hard to imagine what, exactly, it would mean to
+take advantage of the memory hierarchy.
 
-So let's write a simple program whose sole purpose is to exhibit the
-existence of a cache. The L1 cache is the first in the hierarchy so we
-will try to detect it. In particular, we will try do figure out its
-size.
+### Let's detect the L1 cache
+
+As a first step towards becoming cache-aware, let's write a simple
+program whose sole purpose is to exhibit the existence of a cache. The
+L1 cache is the first in the hierarchy so we will try to detect it. In
+particular, we will try to figure out its size.
 
 How can we detect the size of the smallest cache? Well, a program that
 only works with a tiny amount of data will never access RAM after the
@@ -52,21 +55,22 @@ doubling all the elements in the data set.
 
 In pseudocode:
 
-```
-for working_set_size in [1024, 2048, ...]:
-    working_set = allocate(working_set_size)
-    for ii in range(working_set_size):
-	    working_set[ii] *= 2
-```
+    for working_set_size in [1024, 2048, ...]:
+        working_set = allocate(working_set_size)
+        for ii in range(working_set_size):
+	        working_set[ii] *= 2
+
+### That overestimates the L1 cache size
 
 Unfortunately our measurement will be frustrated by another
-microarchitectural innovation: prefetching. Because the patten in
+microarchitectural innovation: _prefetching_. Because the patten in
 which we access the data (linear streaming) is so common and easy to
 predict, modern hardware simply fetches into cache before we even ask
-for it. While it would be interesting to detect and measure
-prefetching, that's not the task we've set ourselves here.
+for it. Prefetching has the effect of making caches look larger than
+they really are, and to spread out the discontinuity in the graph of
+performance vs size.
 
-Another complication is automatic compiler vectorization: modern
+Another complication is automatic compiler _vectorization_: modern
 processors offer instructions that act on several scalar values at
 once. Compilers can recognize common patterns where vectorization is
 safe and automatically optimize your code to use these instructions.
@@ -86,6 +90,8 @@ independent of every other. If the the compiler unrolls the loop, the
 hardware could have an easy time executing several multiplications at
 once.
 
+### Isolating the cache
+
 There's an easy way to eliminate all these sources of error: access
 the data in a random way such that the location of the next access
 depends on the result of the previous one. That way, the processor
@@ -95,12 +101,12 @@ in parallel.
 We will use the fact that floating-point addition is not associative
 (read about Kahan summation if this is new to you). The processor is
 forced to execute additions in order so that the result is correct.
-Instead of doubling every element in an array, we will do 1 million
-additions of entries in the array (reusing some of them). Which values
-we add together, and the order in which we add them, will be
+Instead of doubling every element in an array, we will add together a
+bunch of entries in the array (perhaps reusing some of them). Which
+values we add together, and the order in which we add them, will be
 randomized based on the running sum so far. One nice consequence of
 this is that we won't have to scale the time taken by the size of the
-working set: we always perform 1 million additions.
+working set: we always perform the same number of additions.
 
 An easy way to do this is to take the current value of the sum,
 interpret its bits as 64-bit address, and mod by the size of the
@@ -110,12 +116,10 @@ with the current data value before generating the next address.
 
 In pseudocode:
 
-```
-M = 1e6
-for working_set_size in [1024, 2048, ...]:
-    working_set = allocate(working_set_size)
-	result = 0
-    for ii in range(M):
-	    address = (unsigned 64 bit number)result % working_set_size
-		result += working_set[address]
-```
+    M = 1e6
+    for working_set_size in [1024, 2048, ...]:
+        working_set = allocate(working_set_size)
+    	result = 0
+        for ii in range(M):
+	        address = (unsigned 64 bit number)result % working_set_size
+    		result += working_set[address]
