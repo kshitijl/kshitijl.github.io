@@ -55,11 +55,12 @@ doubling all the elements in the data set.
 
 In pseudocode:
 
-    for working_set_size in [1024, 2048, ...]:
-        working_set = allocate(working_set_size)
-        for ii in range(working_set_size):
-	        working_set[ii] *= 2
-
+{% highlight python %}
+for working_set_size in [1024,
+    working_set = allocate(working_set_size)
+    for ii in range(working_set_size):
+        working_set[ii] *= 2
+{% endhighlight %}
 ### That overestimates the L1 cache size
 
 Unfortunately our measurement will be frustrated by another
@@ -116,10 +117,13 @@ with the current data value before generating the next address.
 
 In pseudocode:
 
-    M = 1e6
-    for working_set_size in [1024, 2048, ...]:
-        working_set = allocate(working_set_size)
-    	result = 0
-        for ii in range(M):
-	        address = (unsigned 64 bit number)result % working_set_size
-    		result += working_set[address]
+{% highlight python %}
+M = 1e6
+for working_set_size in [1024, 2048, ...]:
+	working_set = allocate(working_set_size)
+	result = 0
+	for ii in range(M):
+		address = (unsigned 64 bit number)result % working_set_size
+		result += working_set[address]
+{% endhighlight %}
+
