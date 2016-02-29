@@ -78,7 +78,11 @@ increase in the number of parameters).
 
 To nail down the right values of all those parameters you use a large
 number of training examples. This can be expressed as a mathematical
-optimization problem: minimize error(model, data).
+optimization problem:
+
+$$
+\min_{parameters} error(model, data)
+$$
 
 There is no general efficient algorithm for such optimization problems
 but there are ways to find approximate solutions quickly if you can
@@ -87,9 +91,11 @@ parameters of the model (this imposes restrictions on what kinds of
 models are admissible: not all models are differentiable). And there
 is no general efficient algorithm to compute derivatives.
 
+### Lots of data
+
 But for the special case of linear classifiers connected in a graph,
-there's an algorithm called backpropagation that makes it efficient to
-compute gradients for large networks and truly huge datasets. And
+there's an algorithm called _backpropagation_ that makes it efficient
+to compute gradients for large networks and truly _huge_ datasets. And
 that's why neural networks work.
 
 It's an amazing paradox that mathematicians are working to explain:
