@@ -5,7 +5,7 @@ date:   2016-02-24 00:05:26 -0500
 categories: measurement
 ---
 
-###Modern CPUs are faster than older ones
+### Modern CPUs are faster than older ones
 
 That's not just because they pack more silicon, but also because their
 architecture is more clever. The most fundamental of these

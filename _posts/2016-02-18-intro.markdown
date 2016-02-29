@@ -5,7 +5,7 @@ date:   2016-02-18 00:05:26 -0500
 categories: intro
 ---
 
-#I used to not care about hardware.
+# I used to not care about hardware.
 
 I'm one of those typical programmers who cares about algorithms and
 software design. I like math and statically typed functional
@@ -45,7 +45,7 @@ it makes sense to saturate it using several CPUS. That's a complete
 reversal of the usual design where several hard drives are controlled
 by a single CPU.
 
-###This has incredibly deep consequences for our programs
+### This has incredibly deep consequences for our programs
 
 It used to be the case that we could expect software to get faster
 every year with no extra work -- we could piggyback off of hardware
