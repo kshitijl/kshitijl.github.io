@@ -1,0 +1,425 @@
+---
+layout: post
+title:  "Homemade Netflix remote using my iPhone"
+date:   2016-02-18 00:05:26 -0500
+categories: intro
+---
+
+# I just want to control Netflix using my iPhone
+
+
+I have a pretty standard modern setup: I sit on my couch with my
+Macbook Air on my lap and my iPhone right next to me. I have a TV but
+I don't pay for cable. Instead, the TV is hooked up to a Linux desktop
+machine. I play Netflix on the big screen while browsing the internet
+on my laptop.
+
+My problem is that I keep having to get up and walk over to the
+desktop's keyboard to pause the video. I'm also a little OCD so I like
+to rewind a little when I miss some line of dialogue. I have a
+Chromecast but I find it painfully laggy, taking seconds to respond
+when I pause and up to a minute to reload the video when I back up 5
+seconds.
+
+What I want is to be able to pause and rewind the video from my
+iPhone. I don't really want extra devices, like some universal remote
+plus an IR receiver. I don't want some kind of heavyweight remote
+desktop solution. I'm a lazy low-tech hacker and I hate wasting time
+installing and configuring packages. It's so boring!
+
+Now, what I want seems reasonable. The Netflix web app has keyboard
+shortcuts for pause/play, rewind, fast-forward, fullscreen and a few
+more. So if I can somehow send keypresses from my iPhone to my
+desktop, I'm done. 
+
+## I don't want to write an iPhone app
+
+Writing small programs for the iPhone is a pain in the butt. You have
+to pay Apple $100, you have to use this heavyweight XCode thing, you
+have to use proprietary languages that aren't C++ or Python.
+
+I don't want to do any of that. Instead, I found [an iPhone
+app](https://itunes.apple.com/us/app/touch-mouse/id338237450?mt=8)
+from Logitech called TouchMouse that lets you use your iPhone to
+control the keyboard and mouse on your computer. The only problem is
+that the computer has to be Windows or Mac. No Linux server.
+
+I google around and find that someone else wrote [a Linux
+server](https://github.com/mycroes/touchmoused) for this exact app.
+Unfortunately, I can't get it to work and it's written in Perl. I
+don't understand Perl and I have no desire to learn, but a quick look
+at the source reveals some useful terms to Google: `uinput` and
+`avahi`. I'm not getting an out-of-the-box solution. Besides, I don't
+want a generic "control my computer" app, I just want to send Netflix
+keyboard shortcuts.
+
+That's okay, I install the app on my phone anyway and fire it up. It
+brings up a screen to select a server, with none available. What
+protocol does this app use to communicate with its server? It can't be
+IR: I don't think the iPhone has IR hardware. It can't be Bluetooth:
+most computers don't have Bluetooth hardware. That leaves good old
+TCP/IP networking.
+
+## Let's reverse-engineer the protocol
+
+To confirm that the TouchMouse app uses plain old networking, I first
+figure out my iPhone's IP address by going to my wireless router's
+admin console and looking at the list of DHCP clients. Other ways to
+do this: `arp -a` on Mac/Linux or
+`Settings->Wi-Fi->$network->DHCP` on the iPhone.
+
+Once I know my phone's IP address is `192.168.0.104` I can watch for
+traffic to and from that address:
+
+    sudo tcpdump host 192.168.0.104
+
+The output from this teaches us a little:
+
+	lauria@pikachu:~/src/netflix-remote$ sudo tcpdump host 192.168.0.104
+	tcpdump: verbose output suppressed, use -v or -vv for full protocol decode
+	listening on enp0s31f6, link-type EN10MB (Ethernet), capture size 262144 bytes
+	15:56:25.573283 IP 192.168.0.104 > all-routers.mcast.net: igmp leave 224.0.0.251
+	15:56:25.573299 IP 192.168.0.104 > 224.0.0.251: igmp v2 report 224.0.0.251
+	15:56:35.905448 IP 192.168.0.104.mdns > 224.0.0.251.mdns: 0 [1au] PTR (QU)? _iTouch._tcp.local. (65)
+	15:56:36.912987 IP 192.168.0.104.mdns > 224.0.0.251.mdns: 0 [1au] PTR (QM)? _iTouch._tcp.local. (65)
+	15:56:39.922997 IP 192.168.0.104.mdns > 224.0.0.251.mdns: 0 [1au] PTR (QM)? _iTouch._tcp.local. (65)
+	15:56:48.946039 IP 192.168.0.104.mdns > 224.0.0.251.mdns: 0 [1au] PTR (QM)? _iTouch._tcp.local. (65)
+
+The phone is sending out multicast (mDNS) queries for some service
+called `"_iTouch._tcp"`, which I guess is what Logitech decided to
+call their protocol. Next, I type in my Linux machine's IP address
+`192.168.0.125` into the field in the phone, which generates this
+flurry of traffic:
+
+	15:58:39.760368 ARP, Request who-has 192.168.0.125 tell 192.168.0.104, length 46
+	15:58:39.760392 ARP, Reply 192.168.0.125 is-at 9c:5c:8e:d0:63:c9 (oui Unknown), length 28
+	
+	15:58:39.762676 IP 192.168.0.104.58050 > 192.168.0.125.4026: Flags [S], seq 440934132, win 65535, options [mss 1460,nop,wscale 5,nop,nop,TS val 281295478 ecr 0,sackOK,eol], length 0
+	15:58:39.762708 IP 192.168.0.125.4026 > 192.168.0.104.58050: Flags [R.], seq 0, ack 440934133, win 0, length 0
+
+This teaches us a lot! The first two lines is just the phone figuring
+out the MAC address of my desktop. The next two lines show that the
+phone attempted to connect to the desktop on port 4026 but was
+refused.
+
+So let's start listening on that port (in a separate terminal):
+
+    nc -l
+
+and try connecting again. It works! The app changes screen and
+presents me with a touchpad and a link to a keyboard. Here's the
+traffic:
+
+	16:27:33.987640 IP 192.168.0.104.58062 > 192.168.0.125.4026: Flags [S], seq 2272852486, win 65535, options [mss 1460,nop,wscale 5,nop,nop,TS val 281411714 ecr 0,sackOK,eol], length 0
+
+	16:27:33.987669 IP 192.168.0.125.4026 > 192.168.0.104.58062: Flags [S.], seq 1628003144, ack 2272852487, win 28960, options [mss 1460,sackOK,TS val 6850390 ecr 281411714,nop,wscale 7], length 0
+
+	16:27:33.992517 IP 192.168.0.104.58062 > 192.168.0.125.4026: Flags [.], ack 1, win 4117, options [nop,nop,TS val 281411723 ecr 6850390], length 0
+
+	16:27:34.131806 IP 192.168.0.104.mdns > 224.0.0.251.mdns: 0 [1au] PTR (QM)? _iTouch._tcp.local. (65)
+
+We've got our three-way handshake to initiate the TCP connection,
+followed by a pointed request: "Heard about any `_iTouch._tcp`
+services running around here?"
+
+I move the mouse around on the app and press some keys. This generates a TON of traffic:
+
+	16:41:31.807717 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:31.839132 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:31.839159 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:31.872915 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:31.872943 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:31.907583 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:31.907606 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:32.056140 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:32.056167 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:32.072784 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:32.072810 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:32.089236 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:36.182378 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:36.182413 IP 192.168.0.125 > 192.168.0.104: ICMP 192.168.0.125 udp port 4026 unreachable, length 52
+	16:41:38.616284 IP 192.168.0.104.57118 > 192.168.0.125.4026: UDP, length 16
+	16:41:38.616306 IP 192.168.0.125 > 192.168.0.104: ICMP 192.168.0.125 udp port 4026 unreachable, length 52
+
+But it's all UDP traffic, and we're not listening for anything on UDP
+port 4026! UDP makes a lot of sense for this use-case: it's okay to
+drop some input packets, and low latency is important.
+
+So let's start another `netcat`, this time listening on UDP port 4026:
+
+    nc -ul 4026
+
+Why not just the UDP listener? Why do we need them both? Well, we know
+that the phone initiates a TCP connection, and when I kill the TCP
+listener it doesn't move to the input screen. I guess this design
+makes sense: TCP is used to initiate and maintain the connection,
+while UDP is used to send the actual data.
+
+Now when I move the mouse or press keys in the app, I see a bunch of
+unprintable binary output from the UDP listener. Sucess! Hex output
+will be easier to understand. `tcpdump` tells us the length of each
+UDP packet is 16, so I kill the listener and start again:
+
+    nc -ul 4026 | hexdump
+
+which nicely shows us one line per UDP packet (I think that's a lucky
+accident of the defaults). I type in some letters in sequence starting
+with `a`:
+
+	00000e0 0000 0d00 0000 6100 8c1c d8de 7126 fc4a
+	00000f0 0000 0d00 0000 6200 8c1c dade 8923 1fa0
+	0000100 0000 0d00 0000 6300 8c1c dbde 6b3a 5d33
+	0000110 0000 0d00 0000 6400 8c1c ddde a020 f75e
+	0000120 0000 0d00 0000 6500 8c1c dfde b51d d77f
+	0000130 0000 0d00 0000 6600 8c1c e0de cf13 3446
+	0000140 0000 0d00 0000 6700 8c1c e1de d515 a343
+	0000150 0000 0d00 0000 6800 8c1c e1de a72e cc63
+	0000160 0000 0d00 0000 6900 8c1c e2de e70d 20b9
+	0000170 0000 0d00 0000 6a00 8c1c e2de bd28 7c1f
+	0000180 0000 0d00 0000 6b00 8c1c e3de f903 b8ca
+	0000190 0000 0d00 0000 6c00 8c1c e3de ca1f a1e2
+
+Both the seventh byte and the last 6 bytes are in strictly increasing
+order, so next I type `abcddcba` at the app and get this output on
+`netcat`:
+
+	0000840 0000 0d00 0000 6100 8c1c 86df 8615 4239
+	0000850 0000 0d00 0000 6200 8c1c 87df 8a21 7159
+	0000860 0000 0d00 0000 6300 8c1c 88df 9619 880c
+	0000870 0000 0d00 0000 6400 8c1c 89df 941c 0f68
+	0000880 0000 0d00 0000 6400 8c1c 8adf 9323 36b6
+	0000890 0000 0d00 0000 6300 8c1c 8ddf bf11 5d3a
+	00008a0 0000 0d00 0000 6200 8c1c 8edf dd08 50ce
+	00008b0 0000 0d00 0000 6100 8c1c 8fdf ea03 13ea
+
+Great, now we know it's definitely the seventh byte that has the
+keypress. Actually, `61` is hex for `97` which is the ASCII code for
+`a`. The last four bytes are some kind of increasing sequence. It's
+not orderly so I'd wager it's a timestamp. Presumably that's so the
+server can sort them (UDP packets can arrive out-of-order). We'll just
+ignore that.
+
+How do I tell keypresses from mouse movement? Here's what mouse
+movement looks like:
+
+	00021b0 0000 0700 ffff ffff 0100 43da 0509 8ea4
+	00021c0 0000 0600 0000 0000 0100 43da 020b c80a
+	00021d0 0000 0700 ffff ffff 0100 43da 020b c80a
+	00021e0 0000 0600 0000 0000 0100 43da fe0d 51a8
+	00021f0 0000 0700 ffff ffff 0100 43da fe0d 51a8
+	0002200 0000 0600 0000 0000 0100 43da fa10 3c20
+	0002210 0000 0700 ffff ffff 0100 43da fa10 3c20
+	0002220 0000 0400 0000 0000 0100 43da d127 637c
+
+So the third byte is a kind of type-marker: `0d` for keypresses; `04`,
+`06`, `07` and others for mouse movements. We'll ignore all packets
+that don't have `0d` as the third byte.
+
+At this point we know what we need to about the protocol.
+
+## Time to write a server
+
+Python makes writing one-off servers incredibly easy. In this case,
+begin by listening on TCP port 4026:
+
+{% highlight python %}
+#!/usr/bin/python
+
+touchmouse_port = 4026
+
+import socket
+
+# The app looks for an open listening TCP socket on port 4026
+tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+# SO_REUSEADDR lets me run this code over and over without getting
+# "Address already in use"
+tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+tcp_socket.bind(("", touchmouse_port))
+tcp_socket.listen(1)
+{% endhighlight %}
+
+We create a socket of the `socket.SOCK_STREAM`, which means TCP
+because it guarantees data comes in a stream rather than
+higgledy-piggledy the way it does with UDP. We bind it to port 4026
+and listen. Socket programming is so terse when you don't do it in C!
+
+Next, listen on UDP port 4026 and read data 16 bytes at a time:
+
+{% highlight python %}
+# The actual data comes in on UDP on the same port
+udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+udp_socket.bind(("", touchmouse_port))
+while 1:
+    data, addr = udp_socket.recvfrom(16)
+	    data = map(ord, data) # bytes->integer codes
+
+    if data[3] == 13: # 0x0d = 13, the keyboard code
+	    print chr(data[7])
+{% endhighlight %}
+
+Now we have `socket.SOCK_DGRAM` socket, which means UDP. Again, we
+bind it to port 4026 but there's no `listen()`. We directly attempt to
+receive data in 16 byte chunks (that call to `recvfrom()` blocks until
+there's data). 
+
+I test this has the desired effect: it prints characters to stdout as
+I type them on my phone. Almost seems like magic, but we know exactly
+how it's happening.
+
+Next, we want to make Netflix think we're using its keyboard
+shortcuts.
+
+## Emitting keyboard events
+
+Modern Linux kernels have this subsystem called `uinput` that lets you
+generate input device events like keypresses, mouse movements,
+joystick movements and stuff. Even better, someone wrote [Python
+bindings](http://tjjr.fi/sw/python-uinput/) so I'll just use that.
+
+First I have to install it:
+
+    sudo pip install python-uinput
+
+This fails because `gcc` fails at some stage, with no useful error
+message except that `ld` complained. I muck around for a bit and
+figure from the argument `-ludev` that I'm missing a library, which I
+install with
+
+    sudo apt-get install libudev-dev
+
+Now `python-uinput` installs successfully but I'm unable to run the
+example program. Turns out you need `sudo` permissions to write to
+`/dev/uinput`, which makes sense, or else you need to
+
+    sudo chmod +x /dev/uinput
+
+Now I can successfully generate keypresses from a Python program, and
+they go to whichever window is in focus. I'm so close!
+
+I already know to use the spacebar to pause/play. From Netflix I find
+out the other shortcuts I want, `Shift-Left` to rewind and
+`Shift-Right` to fast-forward. Now, `python-uinput` mentions
+`KEY_SPACE` but not `Shift`. Nowhere is `KEY_LEFTCTRL` defined even
+though it's used in the examples. I figure that means the constants
+must be read directly from the C header, which googling the constant
+shows to be `Linux/include/uapu/linux/input-event-codes.h`.
+
+That tells me the names of the constants I need to use, which is
+enough to write a class for sending Netflix keyboard shortcuts to the
+window in focus:
+ 
+{% highlight python %}
+import uinput
+class NetflixDevice(object):
+    def __init__(self):
+        self._device = uinput.Device([uinput.KEY_SPACE,
+                                      uinput.KEY_LEFT,
+                                      uinput.KEY_RIGHT,
+                                      uinput.KEY_LEFTSHIFT])
+    def toggle_pause(self):
+        self._device.emit_click(uinput.KEY_SPACE)
+
+    def rewind(self):
+        self._device.emit_combo([uinput.KEY_LEFTSHIFT,
+                                 uinput.KEY_LEFT])
+
+    def fast_forward(self):
+        self._device.emit_combo([uinput.KEY_LEFTSHIFT,
+                                 uinput.KEY_RIGHT])
+{% endhighlight %}
+
+At this point, all that remains is to pick a control-scheme. I'm not a
+UX designer but I figure the three commands I just defined (`pause`,
+`rewind`, `fast-forward`) will be pretty common, so I want to devote
+large parts of the screen to them.
+
+I decided to divide the phone keyboard into three regions: left,
+middle and right. Any key on the left means `rewind`, any key in the
+middle means `pause/play`, and any key on the right means
+`fast-forward`.
+
+In summary: I have to look at byte number 7 of the UDP packet and call
+one of three functions from `NetflixDevice`:
+
+{% highlight python %}
+netflix = NetflixDevice()
+while 1:
+    data, addr = udp_socket.recvfrom(8)
+    data = map(ord, data) # bytes->integer codes
+
+    if data[3] == 13: # keyboard code
+        qq = chr(data[7])
+        if  qq in "qwaszxedc":
+            netflix.rewind()
+        elif qq in "rfvtgbyhn":
+            netflix.toggle_pause()
+        elif qq in "ujmikolp":
+            netflix.fast_forward()
+{% endhighlight %}
+
+That's it, I have a working remote control at this point.
+
+## But I don't like to type IP addresses into my phone
+
+Let's go back to those mDNS queries for `_iTouch._tcp` that the phone
+app was making. It's using a protocol called ZeroConf to find the
+hostnames and IP addresses of computers on the network that are
+running TouchMouse servers. Run
+
+    avahi-browse -a
+
+to see all services provided on your local network. If you have a
+Chromecast, you'll see `_googlecast._tcp` in there. Run
+
+    avahi-browse -a --resolve
+
+to see more details for each service provider, including their IP
+addresses.
+
+On Linux we can use `avahi-publish` to publish our IP address to the
+local network, saying we provide the `_iTouch._tcp` service:
+
+    avahi-publish-service `hostname` "_iTouch._tcp" 4026
+
+Now my Linux machine (hostname `pikachu`) shows up on the phone's list
+of servers and I can just click on it instead of typing its IP
+address.
+
+## I want to launch Netflix over ssh
+
+I to browse the Netflix website on my laptop, select what I want to
+watch, and then play it on my TV. Chromecast is supposed to provide
+this functionality, but like I said it's unacceptably laggy. We live
+in 2016 with Gigabit ethernet cables and `802.11ac` wireless. I can do
+better than Chromecast (with my monstrously powerful machine).
+
+So I'm `ssh`ed into my desktop from my laptop. I figure out which
+movie I want to watch, play it on my laptop, and copy the URL. Now I
+go to the `ssh` session:
+
+    google-chrome <video URL>
+
+Too bad it's not this easy. Chrome tries to start on my laptop instead
+of on my desktop, and fails because I guess I didn't `ssh` with
+X11-forwarding turned on. After some googling it turns out the magic
+environment variable is called `DISPLAY`:
+
+    echo $DISPLAY
+
+on the desktop says `:0`, while it prints the empty string on the
+`ssh` terminal. To launch something on a given monitor, I just need to
+set that environment variable before running the program:
+
+    DISPLAY=:0 google-chrome <video URL>
+
+does the trick. All that remains is to add another keyboard shortcut,
+`Ctrl-W` to the server for closing a tab when I'm done with one video
+and want to start another. Otherwise Netflix complains I'm watching
+from too many open tabs.
+
+## tl;dr just give me the code
+
+Here's the [github repo](https://github.com/kshitijl/netflix-remote).
+The code is small and easy to understand, so use it to build your own
+remote controls!
