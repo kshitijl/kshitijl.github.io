@@ -107,8 +107,7 @@ So let's start listening on that port (in a separate terminal):
     nc -l
 
 and try connecting again. It works! The app changes screen and
-presents me with a touchpad and a link to a keyboard. Here's the
-traffic:
+presents me with a touchpad and keyboard. Here's the traffic:
 
 	16:27:33.987640 IP 192.168.0.104.58062 > 192.168.0.125.4026: Flags [S], seq 2272852486, win 65535, options [mss 1460,nop,wscale 5,nop,nop,TS val 281411714 ecr 0,sackOK,eol], length 0
 
@@ -157,8 +156,7 @@ while UDP is used to send the actual data.
 
 Now when I move the mouse or press keys in the app, I see a bunch of
 unprintable binary output from the UDP listener. Sucess! Hex output
-will be easier to understand. `tcpdump` tells us the length of each
-UDP packet is 16, so I kill the listener and start again:
+will be easier to understand:
 
     nc -ul 4026 | hexdump
 
@@ -180,7 +178,7 @@ with `a`:
 	0000190 0000 0d00 0000 6c00 8c1c e3de ca1f a1e2
 
 Both the seventh byte and the last 6 bytes are in strictly increasing
-order, so next I type `abcddcba` at the app and get this output on
+order, so next I type `abcddcba` at the app and get this output out of
 `netcat`:
 
 	0000840 0000 0d00 0000 6100 8c1c 86df 8615 4239
@@ -194,10 +192,10 @@ order, so next I type `abcddcba` at the app and get this output on
 
 Great, now we know it's definitely the seventh byte that has the
 keypress. Actually, `61` is hex for `97` which is the ASCII code for
-`a`. The last four bytes are some kind of increasing sequence. It's
+`a`. The last eight bytes are some kind of increasing sequence. It's
 not orderly so I'd wager it's a timestamp. Presumably that's so the
 server can sort them (UDP packets can arrive out-of-order). We'll just
-ignore that.
+ignore it.
 
 How do I tell keypresses from mouse movement? Here's what mouse
 movement looks like:
@@ -388,19 +386,20 @@ address.
 
 ## I want to launch Netflix over ssh
 
-I to browse the Netflix website on my laptop, select what I want to
+I want to eliminate the need to walk over to my desktop. That means I
+want to browse the Netflix website on my laptop, select what I want to
 watch, and then play it on my TV. Chromecast is supposed to provide
 this functionality, but like I said it's unacceptably laggy. We live
 in 2016 with Gigabit ethernet cables and `802.11ac` wireless. I can do
 better than Chromecast (with my monstrously powerful machine).
 
 So I'm `ssh`ed into my desktop from my laptop. I figure out which
-movie I want to watch, play it on my laptop, and copy the URL. Now I
-go to the `ssh` session:
+movie I want to watch, hit play, and copy the URL. Now I go to the
+`ssh` session:
 
     google-chrome <video URL>
 
-Too bad it's not this easy. Chrome tries to start on my laptop instead
+Too bad it's not that easy. Chrome tries to start on my laptop instead
 of on my desktop, and fails because I guess I didn't `ssh` with
 X11-forwarding turned on. After some googling it turns out the magic
 environment variable is called `DISPLAY`:
@@ -413,10 +412,19 @@ set that environment variable before running the program:
 
     DISPLAY=:0 google-chrome <video URL>
 
-does the trick. All that remains is to add another keyboard shortcut,
-`Ctrl-W` to the server for closing a tab when I'm done with one video
-and want to start another. Otherwise Netflix complains I'm watching
-from too many open tabs.
+does the trick.
+
+All that remains is to add two new keyboard shortcuts:
+
+* `Ctrl-W` to the server for closing a tab when I'm done with one
+video and want to start another. Otherwise Netflix complains I'm
+watching from too many open tabs.
+* `f` to toggle fullscreen, because the Chrome tab doesn't start
+  fullscreen
+
+Since these are infrequently used commands, I map them to smaller
+areas of the phone screen: spacebar for fullscreen, and any numeric
+character `0-9` to close the video.
 
 ## tl;dr just give me the code
 
