@@ -18,8 +18,8 @@ a black art.
 That's no longer true. The need to run Javascript fast (ha ha) has
 brought JIT compilation to every browser. The success of LLVM made it
 possible for a much larger number of people to use JIT compilation in
-their own projects. PyPy is also based on JIT
-compilation. It's everywhere now!
+their own projects. Even PyPy is based on JIT compilation. It's
+everywhere now!
 
 The idea is simple: instead of writing an interpreter (code) that acts
 on behalf of the high-level language (data), you compile the
@@ -105,7 +105,7 @@ bytes instead of one. That's good because low level blah blah branch
 predictors can only keep track of up to three branch instructions per
 16 bytes of code, and this function's code might be after a jump.
 
-Anyway, looks like we just need the 1 byte opcode `retq` and its
+Anyway, looks like we just need the instruction `retq` and its 1-byte
 opcode is `0xc3`. So all we do is:
 
 1. write the byte `0xc3` to a
@@ -162,12 +162,12 @@ And that works!
 ## What if I wanted to return a value?
 
 The x86_64 calling conventions are insanely complex but I think a
-single integer return value is just put in the register `%rax`, which
-means that if a function simply returns, it's returning whatever was
-in `%rax`.
+single integer return value is just supposed to go in the register
+`%rax`, which means that if a function simply returns, it's returning
+whatever was in `%rax`.
 
 Doing that is easy, we just change the type of the function pointer to
-return an int:
+return an `int`:
 
 {% highlight c %}
 
@@ -180,7 +180,7 @@ printf("%d\n", answer);
 {% endhighlight %}
 
 This prints random different numbers every time I run it. In fact,
-looking at the disassembly of call to `func()`
+looking at the disassembly of the call to `func()`
 
     54:   ff d0                   callq  *%rax
 
@@ -216,7 +216,7 @@ memory[1] = 0xc0;
 memory[2] = 0xc3;
 {% endhighlight %}
 
-or the sequence of bytes `0xb8 0x05 0x00 0x00` to return 5.
+or the sequence of bytes `0xb8 0x05 0x00 0x00 0x00` to return 5.
 
 ## Let's make a syscall
 
@@ -323,7 +323,8 @@ int i = 0;
 m[i++] = 0x89;
 m[i++] = 0xf8; // mov edi,eax
 
-//a:   83 c0 0a                add    $0xa,%eax
+//a:   83 c0 0a add    $0xa,%eax
+
 m[i++] = 0x83;
 m[i++] = 0xc0;
 m[i++] = 0x0a;
@@ -368,7 +369,10 @@ returns:
 int return_top_of_stack(char *m) {
     int i = 0;
     m[i++] = 0x58; // pop %rax
+	
     m[i++] = 0xc3; // ret
+
+    return i;
 }
 {% endhighlight %}
 
