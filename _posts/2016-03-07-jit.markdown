@@ -489,3 +489,6 @@ for JIT compilation, like the Berkeley Packet Filter.
 
 ## tl;dr just show me the code
 
+[Here's a github repo](https://github.com/kshitijl/tiny-rpn-jit) which
+I committed code to in roughly the same order as I wrote this post.
+The final JIT is in `rpn.c`.
