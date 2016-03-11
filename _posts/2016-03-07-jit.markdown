@@ -1,0 +1,491 @@
+---
+layout: post
+title:  "JIT: Generating code at runtime"
+date:   2016-03-07 00:05:26 -0500
+categories: bits
+---
+
+## JIT compilation is mainstream now
+
+I remember being blown away when I first heard that the java virtual
+machine compiles tight inner loops to machine code _at runtime_. My
+dad worked on hardware simulators that do the same thing: compile
+circuits to machine code that runs directly on host hardware, as
+opposed to simulating the circuit data. But these instances were
+relatively rare, and I always thought generating code dynamically was
+a black art.
+
+That's no longer true. The need to run Javascript fast (ha ha) has
+brought JIT compilation to every browser. The success of LLVM made it
+possible for a much larger number of people to use JIT compilation in
+their own projects. PyPy is also based on JIT
+compilation. It's everywhere now!
+
+The idea is simple: instead of writing an interpreter (code) that acts
+on behalf of the high-level language (data), you compile the
+high-level language and run those binary instructions (code). There's
+nothing mysterious about it: it's just good old compilation from 1972,
+except that no files are written to disk.
+
+In fact, old Borland products like Turbo Pascal and Turbo C would
+compile your program to a buffer _in memory_ when you ran your program
+from within their IDE. I guess that's because old computers weren't
+smart about caching filesystem writes.
+
+## Why not write our own?
+
+Let's abstract away the compilation process because I already know how
+that works. I just want to write some raw machine opcodes to a buffer
+in memory and then make the processor execute those instructions.
+Simple, right?
+
+Well, I'll have to figure out exactly what opcodes. I can't just read
+an executable on disk and try to execute its bytes because of all
+those ELF headers and stuff. Besides, at the end of executing the
+machine code I want control to return to me ie. the calling context.
+
+Hmm, that sounds familiar: it's a function call! The simplest possible
+function is one that just returns immediately to the caller. Let's
+figure out the instruction for that. First, create a file called
+`return.c`:
+
+{% highlight c %}
+
+void func() {
+    return;
+}
+
+{% endhighlight %}
+
+Compile and disassemble:
+
+    gcc -c return.c
+	objdump -d return.o
+
+The output is:
+
+{% highlight bash %}
+
+return.o:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <func>:
+	0:   55                      push   %rbp	
+	1:   48 89 e5                mov    %rsp,%rbp
+	4:   90                      nop
+	5:   5d                      pop    %rbp
+	6:   c3                      retq
+
+{% endhighlight %}
+
+That's a whole lot of instructions to do nothing! Let's do it with
+optimizations on:
+
+    gcc -c return.c -O3 # gimme all you got
+	objdump -d return.o
+
+{% highlight bash %}
+
+return.o:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <func>:
+   0:   f3 c3                   repz retq
+
+{% endhighlight %}
+
+That's a lot better, but what's that `repz` instruction for? Turns out
+there's a [website named repzret.org](http://repzret.org/p/repzret/)
+and it explains that `repz retq` is the same as just `retq` but two
+bytes instead of one. That's good because low level blah blah branch
+predictors can only keep track of up to three branch instructions per
+16 bytes of code, and this function's code might be after a jump.
+
+Anyway, looks like we just need the 1 byte opcode `retq` and its
+opcode is `0xc3`. So all we do is:
+
+1. write the byte `0xc3` to a
+variable
+1. cast that variable to a `void (*)(void)` function pointer
+1. and then call it.
+
+Right?
+
+{% highlight c %}
+int main() {
+    char opcode = 0xc3;
+    void (*func)(void);
+
+    func = (void (*)(void))(&opcode);
+    func();
+    return 0;
+}
+{% endhighlight %}
+
+## Segmentation fault
+
+Ooh, this is one of the less common reasons for segfaulting: executing
+memory that isn't marked with that permission. We need to use
+`mprotect` to change the permissions on memory before executing it.
+But `mprotect` needs a page-aligned piece of memory, so we have to use
+`memalign` instead of malloc to allocate the memory.
+
+Oh bother, it's easier to just `mmap` an anonymous page and ask for it
+to be writable and executable:
+
+{% highlight c %}
+
+#include <sys/mman.h>
+#include <unistd.h>
+
+int main() {
+    char *memory = (char *)mmap(0, getpagesize(),
+                                   PROT_READ | PROT_WRITE | PROT_EXEC,
+                                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    memory[0] = 0xc3;
+
+    void (*func)(void);
+    func = (void (*)(void))memory;
+
+    func();
+    return 0;
+}
+
+{% endhighlight %}
+
+And that works!
+
+## What if I wanted to return a value?
+
+The x86_64 calling conventions are insanely complex but I think a
+single integer return value is just put in the register `%rax`, which
+means that if a function simply returns, it's returning whatever was
+in `%rax`.
+
+Doing that is easy, we just change the type of the function pointer to
+return an int:
+
+{% highlight c %}
+
+int (*func)(void);
+func = (int (*)(void))memory;
+
+int answer = func();
+printf("%d\n", answer);
+
+{% endhighlight %}
+
+This prints random different numbers every time I run it. In fact,
+looking at the disassembly of call to `func()`
+
+    54:   ff d0                   callq  *%rax
+
+it's clear that we're calling the function whose address is in `%rax`.
+In other words, this function returns its own memory address! We can
+confirm this by casting `memory` to `int` and printing it:
+
+{% highlight c %}
+int answer = func();
+printf("%d %d\n", answer, (int)(memory));
+{% endhighlight %}
+
+To actually return a value, we'll have to `mov` it into `%rax`, or
+better yet just `xor %rax, %rax`. How do I figure out the opcodes for
+those things? Let's just disassemble a function that does `return 5`:
+
+    0:   b8 05 00 00 00          mov    $0x5,%eax
+    5:   c3                      retq
+
+And here's the disassembly for `return 0`:
+
+    0:   31 c0                   xor    %eax,%eax
+    2:   c3                      retq
+
+Note that I had to compile with optimizations on to get these simple
+forms.
+
+So we put the bytes `0x31` and `0xc0` before the `0xc3` to return 0:
+
+{% highlight c %}
+memory[0] = 0x31;
+memory[1] = 0xc0;
+memory[2] = 0xc3;
+{% endhighlight %}
+
+or the sequence of bytes `0xb8 0x05 0x00 0x00` to return 5.
+
+## Let's make a syscall
+
+This is a strange detour but I'll take it. What if, for some insane
+reason, I wanted to make a syscall from within the generated code?
+It's pretty simple, you put the syscall number (1 for `exit`, 4 for
+`write`, etc.) in register `%eax`, any arguments in subsequent
+registers, and then execute interrupt `0x80`.
+
+The `exit` syscall is pretty easy to invoke: just put 1 in `%eax` and the program's return code in `%ebx`, then hit that interrupt button:
+
+{% highlight c %}
+int i = 0;
+
+m[i++] = 0xb8;
+m[i++] = 0x01;
+m[i++] = 0x00;
+m[i++] = 0x00;
+m[i++] = 0x00; // mov 0x1 %eax
+
+m[i++] = 0xbb;
+m[i++] = 0x01;
+m[i++] = 0x00;
+m[i++] = 0x00;
+m[i++] = 0x00; // mov 0x1,%ebx
+
+m[i++] = 0xcd;
+m[i++] = 0x80; // int 0x80
+
+m[i++] = 0xc3; // not strictly necessary, because we exit
+{% endhighlight %}
+
+
+but I had trouble getting `write` to work because I couldn't get the
+right address to it. The problem is that I still am not passing
+arguments _into_ the dynamically generated code. That's a pretty basic
+requirement for doing something useful.
+
+## Passing arguments in
+
+Blah blah `amd64` calling conventions ... I could read a big pdf or I
+could just disassemble what the compiler produces to figure out how it
+expects functions to take their arguments. I disassembled the
+following C program:
+
+{% highlight c %}
+int first(int a) {
+    return a+10;
+}
+
+void second() {
+    first(10);
+}
+{% endhighlight %}
+
+and got this:
+
+{% highlight asm %}
+
+0000000000000000 <first>:
+0:   55                      push   %rbp
+1:   48 89 e5                mov    %rsp,%rbp
+4:   89 7d fc                mov    %edi,-0x4(%rbp)
+7:   8b 45 fc                mov    -0x4(%rbp),%eax
+a:   83 c0 0a                add    $0xa,%eax
+d:   5d                      pop    %rbp
+e:   c3                      retq
+
+000000000000000f <second>:
+f:   55                      push   %rbp
+10:   48 89 e5                mov    %rsp,%rbp
+13:   bf 0a 00 00 00          mov    $0xa,%edi
+18:   e8 00 00 00 00          callq  1d <second+0xe>
+1d:   5d                      pop    %rbp
+1e:   c3                      retq
+
+{% endhighlight %}
+
+The important bit is `mov $0xa,%edi` followed by `callq` in the
+function `second`, which puts the number 10 in register `%edi` before
+calling the function `first`. That function copies `%edi` in a really
+roundabout way to `%eax` and then adds 10 to it, at which point it can
+return because the return value is supposed to end up in `%eax`.
+
+Now we're ready to generate machine code that adds 10 to its argument:
+grab the input from `%edi`, copy it to `%eax`, add 10 and return. For
+that, I'll need the instruction
+
+    mov %edi, %eax
+
+But how do I figure out its opcode? Easy, just call `as` on the
+command line and start typing in assembly. `Ctrl+D` sends EOF and the
+GNU assembler will produce a file called `a.out` which we can
+disassemble to find out that
+
+    0:   89 f8                   mov    %edi,%eax
+
+Similarly, I figure out how to `add $0xa,%eax`. So a function for
+returning its input plus 10 is generated as follows:
+
+{% highlight c %}
+
+int i = 0;
+m[i++] = 0x89;
+m[i++] = 0xf8; // mov edi,eax
+
+//a:   83 c0 0a                add    $0xa,%eax
+m[i++] = 0x83;
+m[i++] = 0xc0;
+m[i++] = 0x0a;
+
+m[i++] = 0xc3;
+
+{% endhighlight %}
+
+Here's the one-liner for figuring out opcodes:
+
+    echo 'mov %edi,%eax' | as && objdump -d a.out
+
+## Compiling arithmetic expressions
+
+Like I said, this post isn't about aspects of the compilation process
+upstream of code generation, like lexing or parsing. But I do want to
+do something interesting, like emit instructions for arithmetic and
+then execute them. Besides, what's the point of executing arbitrary
+machine instructions in memory if they don't change based on user
+input?
+
+So I picked a reasonable compromise: I'll take an arithmetic
+expression in Reverse Polish Notation as input and emit instructions
+for it. That's because RPN expressions are incredibly easy to evaluate
+with a stack machine, which x86 processors happen to be. It's not at
+all an efficient use of the hardware -- I should exhaust all the
+registers first -- but it is simple and elegant.
+
+Here's the plan: the input will be a sequence of numbers and
+operators. Every number will be pushed onto the stack. Every operator
+will pop its two arguments off the stack into the registers `%rax` and
+`%rcx`, which are 64-bit registers that the caller does not expect the
+callee to preserve. After applying the operator, the result will be
+pushed back onto the stack. At the end, we pop the value off the stack
+into `%rax` ie. return it.
+
+Of course we'll split the code generation into separate functions.
+Here's the one that pops the top of the stack into `%rax` and then
+returns:
+
+{% highlight c %}
+int return_top_of_stack(char *m) {
+    int i = 0;
+    m[i++] = 0x58; // pop %rax
+    m[i++] = 0xc3; // ret
+}
+{% endhighlight %}
+
+Its argument is a pointer into the code buffer at the location where
+it should start emitting instructions, and it returns the number of
+bytes it emitted. So the code that calls it looks like this:
+
+{% highlight c %}
+m += return_top_of_stack(m);
+{% endhighlight %}
+
+Here's the function that emits instructions for adding the top two
+items on the stack and pushing the result back on the stack:
+
+{% highlight c %}
+int add(char *m) {
+    int i = 0;
+    m[i++] = 0x58; // pop %rax
+
+    m[i++] = 0x59; // pop %rcx
+
+    m[i++] = 0x48;
+    m[i++] = 0x01;
+    m[i++] = 0xc8; // add %rcx, %rax
+
+    m[i++] = 0x50; // push %rax
+
+    return i;
+}
+{% endhighlight %}
+
+It pops twice, once into `%rax` and once into `%rcx`. Then it adds the
+two and puts the result in `%rax` (I'm using AT&T notation for
+assembly language so that `add` puts its result in the second argument
+register). Finally, it pushes `%rax` onto the stack.
+
+The code for pushing a number on the stack is the most involved
+because it needs to unpack the input argument into its constituent
+bytes. Using a union makes this nice and explicit, because you set the
+value of the bigger type inside the union and then read off the
+individual bytes from the array of `char`s. Of course I could have
+been clever and used a cast of `m` to `int *`, but I like the explicit
+`union` version.
+
+{% highlight c %}
+int push_number(int number, char *m) {
+    union Num {
+        int x;
+        char c[4];
+    } num;
+    assert(sizeof(num) == sizeof(int));
+
+    num.x = number;
+
+    int i = 0;
+    m[i++] = 0x48;
+    m[i++] = 0xc7;
+    m[i++] = 0xc0;
+    m[i++] = num.c[0];
+    m[i++] = num.c[1];
+    m[i++] = num.c[2];
+    m[i++] = num.c[3]; // mov $num,%rax
+
+    m[i++] = 0x50; // push %rax
+
+    return i;
+}
+{% endhighlight %}
+
+Since there's no x64 instruction for pushing a 64-bit value directly
+on the stack ("immediate"), I first copy the value to `%rax` and then
+push `%rax` on the stack. Finally, I return the number of bytes
+emitted.
+
+So the code to emit the instructions to add `10` to `20` and then return would be
+
+{% highlight c %}
+m += push_number(10, m);
+m += push_number(20, m);
+m += add(m);
+m += return_top_of_stack(m);
+{% endhighlight %}
+
+I still need to take input from the user somehow. Since parsing and
+tokenizing is annoying, I'll take the easy way out and let the shell
+do it for me: I simply take arguments on the command-line. For
+example,
+
+    ./a.out 20 30 + 1 +
+
+to add `20` and `30`, then add `1` to the result. That means `argv`
+will contain the tokens and I can simply iterate over it, testing to
+see whether it parses as a number using `scanf`:
+
+{% highlight c %}
+int ii = 0;
+for(ii = 1; ii < argc; ++ii) {
+    int numeric;
+    if(sscanf(argv[ii], "%d", &numeric) == 1)
+        m += push_number(numeric, m);
+    else {
+        assert(strlen(argv[ii]) == 1);
+        char c = argv[ii][0];
+        assert(c == '+');
+        m += add(m);
+    }
+}
+{% endhighlight %}
+
+Since I only decided to implement `add`, I `assert` that some other
+operator wasn't passed in.
+
+Whew! And that's as far as I'm going to go for now. The next
+interesting step is to implement optimizations, but the truth is that
+libraries like LLVM will do a better job at those than I ever will.
+Instead, what I'm waiting for is a compelling domain-specific use-case
+for JIT compilation, like the Berkeley Packet Filter.
+
+## tl;dr just show me the code
+
